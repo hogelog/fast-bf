@@ -124,8 +124,9 @@ public:
     }
     void push_close() {
         int open = pcstack.top();
-        (*insns)[open].value.i1 = insns->size();
-        insns->push_back(Instruction(']', open - 1));
+        int diff = insns->size() - open;
+        (*insns)[open].value.i1 = diff;
+        insns->push_back(Instruction(']', diff + 1));
         optimizer.check_reset_zero();
         pcstack.pop();
         optimizer.check_mem_move();
@@ -259,11 +260,11 @@ LABEL_PUT:
     NEXT_LABEL;
 LABEL_OPEN:
     if (*mem == 0) {
-        pc = exec + pc->value.i1;
+        pc += pc->value.i1;
     }
     NEXT_LABEL;
 LABEL_CLOSE:
-    pc = exec + pc->value.i1;
+    pc -= pc->value.i1;
     NEXT_LABEL;
 LABEL_CALC:
     *mem += pc->value.i1;
