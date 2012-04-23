@@ -244,12 +244,11 @@ void execute(std::vector<Instruction> &insns, int membuf[MEMSIZE]) {
     }
 LABEL_START:
     int *mem = membuf;
-    int pc = -1;
-    ExeCode ecode;
+    ExeCode *pc = exec - 1;
 
 #define NEXT_LABEL \
-    ecode = exec[++pc]; \
-    goto *ecode.addr
+    ++pc; \
+    goto *pc->addr
 
     NEXT_LABEL;
 LABEL_GET:
@@ -260,30 +259,30 @@ LABEL_PUT:
     NEXT_LABEL;
 LABEL_OPEN:
     if (*mem == 0) {
-        pc = ecode.value.i1;
+        pc = exec + pc->value.i1;
     }
     NEXT_LABEL;
 LABEL_CLOSE:
-    pc = ecode.value.i1;
+    pc = exec + pc->value.i1;
     NEXT_LABEL;
 LABEL_CALC:
-    *mem += ecode.value.i1;
+    *mem += pc->value.i1;
     NEXT_LABEL;
 LABEL_MOVE:
-    mem += ecode.value.i1;
+    mem += pc->value.i1;
     NEXT_LABEL;
 LABEL_RESET:
     *mem = 0;
     NEXT_LABEL;
 LABEL_MOVE_CALC:
-    mem[ecode.value.s2.s0] += ecode.value.s2.s1;
+    mem[pc->value.s2.s0] += pc->value.s2.s1;
     NEXT_LABEL;
 LABEL_MEM_MOVE:
-    mem[ecode.value.s2.s0] += *mem * ecode.value.s2.s1;
+    mem[pc->value.s2.s0] += *mem * pc->value.s2.s1;
     *mem = 0;
     NEXT_LABEL;
 LABEL_SEARCH_ZERO:
-    int search_zero = ecode.value.i1;
+    int search_zero = pc->value.i1;
     while (*mem != 0) {
         mem += search_zero;
     }
