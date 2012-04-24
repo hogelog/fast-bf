@@ -6,9 +6,15 @@
 #define MEMSIZE 30000
 
 enum Opcode {
-    INC, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
+    INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
     CALC, MOVE, RESET_ZERO,
     MOVE_CALC, MEM_MOVE, SEARCH_ZERO,
+};
+const char *OPCODE_NAMES[] = {
+    "+", "-", ">", "<",
+    ",", ".", "[", "]", "",
+    "c", "m", "z",
+    "C", "M", "s",
 };
 union Value {
     int i1;
@@ -177,6 +183,9 @@ void parse(std::vector<Instruction> &insns, FILE *input) {
 void debug(std::vector<Instruction> &insns, bool verbose) {
     for (size_t pc=0;;++pc) {
         Instruction insn = insns[pc];
+        const char *name = OPCODE_NAMES[insn.op];
+        printf("%s", name);
+//        fputs(name, stdout);
         switch(insn.op) {
             case INC:
             case DEC:
@@ -185,21 +194,18 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case GET:
             case PUT:
             case RESET_ZERO:
-                putchar(insn.op);
                 break;
             case OPEN:
             case CLOSE:
             case CALC:
             case MOVE:
             case SEARCH_ZERO:
-                putchar(insn.op);
                 if (verbose) {
                     printf("(%d)", insn.value.i1);
                 }
                 break;
             case MOVE_CALC:
             case MEM_MOVE:
-                putchar(insn.op);
                 if (verbose) {
                     printf("(%d,%d)", insn.value.s2.s0, insn.value.s2.s1);
                 }
