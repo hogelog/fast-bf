@@ -5,6 +5,11 @@
 
 #define MEMSIZE 30000
 
+enum Opcode {
+    INC, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
+    CALC, MOVE, RESET_ZERO,
+    MOVE_CALC, MEM_MOVE, SEARCH_ZERO,
+};
 union Value {
     int i1;
     struct {
@@ -13,14 +18,14 @@ union Value {
 };
 class Instruction {
 public:
-    char op;
+    Opcode op;
     Value value;
-    Instruction(char op) : op(op) {
+    Instruction(Opcode op) : op(op) {
     }
-    Instruction(char op, int i1) : op(op) {
+    Instruction(Opcode op, int i1) : op(op) {
         this->value.i1 = i1;
     }
-    Instruction(char op, short s0, short s1) : op(op) {
+    Instruction(Opcode op, short s0, short s1) : op(op) {
         this->value.s2.s0 = s0;
         this->value.s2.s1 = s1;
     }
@@ -51,41 +56,41 @@ public:
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        if (c1.op != '[' || c2.op != 'c' || c2.value.i1 != -1 || c3.op != ']')
+        if (c1.op != OPEN || c2.op != CALC || c2.value.i1 != -1 || c3.op != CLOSE)
             return;
         pop(3);
-        push(Instruction('z'));
+        push(Instruction(RESET_ZERO));
     }
     void check_move_calc() {
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        if (c1.op != 'm' || c2.op != 'c' || c3.op != 'm' || (-c1.value.i1 != c3.value.i1))
+        if (c1.op != MOVE || c2.op != CALC || c3.op != MOVE || (-c1.value.i1 != c3.value.i1))
             return;
         short move = c1.value.i1, calc = c2.value.i1;
         pop(3);
-        push(Instruction('C', move, calc));
+        push(Instruction(MOVE_CALC, move, calc));
     }
     void check_mem_move() {
         if (insns->size() < 4)
             return;
         Instruction c1 = at(-4), c2 = at(-3), c3 = at(-2), c4 = at(-1);
-        if (c1.op != '[' || c4.op != ']' || c2.op != 'c' || c2.value.i1 != -1 || c3.op != 'C')
+        if (c1.op != OPEN || c4.op != CLOSE || c2.op != CALC || c2.value.i1 != -1 || c3.op != MOVE_CALC)
             return;
         pop(4);
         short move = c3.value.s2.s0;
         short calc = c3.value.s2.s1;
-        push(Instruction('M', move, calc));
+        push(Instruction(MEM_MOVE, move, calc));
     }
     void check_search_zero() {
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        if (c1.op != '[' || c2.op != 'm' || c3.op != ']')
+        if (c1.op != OPEN || c2.op != MOVE || c3.op != CLOSE)
             return;
         short move = c2.value.i1;
         pop(3);
-        push(Instruction('s', move));
+        push(Instruction(SEARCH_ZERO, move));
     }
 };
 class Compiler {
@@ -94,10 +99,10 @@ private:
     int calc, move;
     std::stack<int> pcstack;
     Optimizer optimizer;
-    bool is_current_op(char op) {
+    bool is_current_op(Opcode op) {
         return insns->size() != 0 && insns->back().op == op;
     }
-    void push_stack(char op, int i) {
+    void push_stack(Opcode op, int i) {
         if (is_current_op(op)) {
             insns->back().value.i1 += i;
         } else {
@@ -109,31 +114,31 @@ public:
         insns(insns), calc(0), move(0), optimizer(insns) {
     }
     void push_calc(int i) {
-        push_stack('c', i);
+        push_stack(CALC, i);
     }
     void push_move(int i) {
-        push_stack('m', i);
+        push_stack(MOVE, i);
         optimizer.check_move_calc();
     }
-    void push_simple(char op) {
+    void push_simple(Opcode op) {
         insns->push_back(Instruction(op));
     }
     void push_open() {
         pcstack.push(insns->size());
-        insns->push_back(Instruction('['));
+        insns->push_back(Instruction(OPEN));
     }
     void push_close() {
         int open = pcstack.top();
         int diff = insns->size() - open;
         (*insns)[open].value.i1 = diff;
-        insns->push_back(Instruction(']', diff + 1));
+        insns->push_back(Instruction(CLOSE, diff + 1));
         optimizer.check_reset_zero();
         pcstack.pop();
         optimizer.check_mem_move();
         optimizer.check_search_zero();
     }
     void push_end() {
-        push_simple('\0');
+        push_simple(END);
     }
 };
 void parse(std::vector<Instruction> &insns, FILE *input) {
@@ -154,8 +159,10 @@ void parse(std::vector<Instruction> &insns, FILE *input) {
                 compiler.push_move(-1);
                 break;
             case ',':
+                compiler.push_simple(GET);
+                break;
             case '.':
-                compiler.push_simple(ch);
+                compiler.push_simple(PUT);
                 break;
             case '[':
                 compiler.push_open();
@@ -171,33 +178,33 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
     for (size_t pc=0;;++pc) {
         Instruction insn = insns[pc];
         switch(insn.op) {
-            case '+':
-            case '-':
-            case '>':
-            case '<':
-            case ',':
-            case '.':
-            case 'z':
+            case INC:
+            case DEC:
+            case NEXT:
+            case PREV:
+            case GET:
+            case PUT:
+            case RESET_ZERO:
                 putchar(insn.op);
                 break;
-            case '[':
-            case ']':
-            case 'c':
-            case 'm':
-            case 's':
+            case OPEN:
+            case CLOSE:
+            case CALC:
+            case MOVE:
+            case SEARCH_ZERO:
                 putchar(insn.op);
                 if (verbose) {
                     printf("(%d)", insn.value.i1);
                 }
                 break;
-            case 'C':
-            case 'M':
+            case MOVE_CALC:
+            case MEM_MOVE:
                 putchar(insn.op);
                 if (verbose) {
                     printf("(%d,%d)", insn.value.s2.s0, insn.value.s2.s1);
                 }
                 break;
-            case '\0':
+            case END:
                 return;
         }
     }
@@ -208,39 +215,41 @@ void execute(std::vector<Instruction> &insns, int membuf[MEMSIZE]) {
         Instruction insn = insns[pc];
         exec[pc].value = insn.value;
         switch(insn.op) {
-            case ',':
+            case GET:
                 exec[pc].addr = &&LABEL_GET;
                 break;
-            case '.':
+            case PUT:
                 exec[pc].addr = &&LABEL_PUT;
                 break;
-            case '[':
+            case OPEN:
                 exec[pc].addr = &&LABEL_OPEN;
                 break;
-            case ']':
+            case CLOSE:
                 exec[pc].addr = &&LABEL_CLOSE;
                 break;
-            case 'c':
+            case CALC:
                 exec[pc].addr = &&LABEL_CALC;
                 break;
-            case 'm':
+            case MOVE:
                 exec[pc].addr = &&LABEL_MOVE;
                 break;
-            case 'z':
-                exec[pc].addr = &&LABEL_RESET;
+            case RESET_ZERO:
+                exec[pc].addr = &&LABEL_RESET_ZERO;
                 break;
-            case 'C':
+            case MOVE_CALC:
                 exec[pc].addr = &&LABEL_MOVE_CALC;
                 break;
-            case 'M':
+            case MEM_MOVE:
                 exec[pc].addr = &&LABEL_MEM_MOVE;
                 break;
-            case 's':
+            case SEARCH_ZERO:
                 exec[pc].addr = &&LABEL_SEARCH_ZERO;
                 break;
-            case '\0':
+            case END:
                 exec[pc].addr = &&LABEL_END;
                 goto LABEL_START;
+            default:
+                return;
         }
     }
 LABEL_START:
@@ -272,7 +281,7 @@ LABEL_CALC:
 LABEL_MOVE:
     mem += pc->value.i1;
     NEXT_LABEL;
-LABEL_RESET:
+LABEL_RESET_ZERO:
     *mem = 0;
     NEXT_LABEL;
 LABEL_MOVE_CALC:
