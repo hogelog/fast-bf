@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <vector>
 #include <stack>
 
@@ -129,7 +130,7 @@ public:
         insns->push_back(Instruction(']', diff + 1));
         optimizer.check_reset_zero();
         pcstack.pop();
-        optimizer.check_mem_move();
+        //optimizer.check_mem_move();
         optimizer.check_search_zero();
     }
     void push_end() {
@@ -201,6 +202,76 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
                 return;
         }
     }
+}
+void print_indent(int indent) {
+    for (int i = 0; i < indent; ++i)
+        putchar(' ');
+}
+void print_c(std::vector<Instruction> &insns, int indent) {
+    for (size_t pc=0;pc<insns.size();++pc) {
+        print_indent(indent);
+        Instruction insn = insns[pc];
+        switch(insn.op) {
+            case ',':
+                puts("*mem = getchar();");
+                break;
+            case '.':
+                puts("putchar(*mem);");
+                break;
+            case '[':
+                puts("while (*mem != 0) {");
+                {
+                    size_t from = pc + 1, to = pc + insn.value.i1;
+                    std::vector<Instruction> loop_body(insns.begin() + from, insns.begin() + to);
+                    print_c(loop_body, indent + 2);
+                    pc = to;
+                }
+                print_indent(indent);
+                puts("}");
+                break;
+            case ']':
+                return;
+            case 'c':
+                printf("*mem += %d;\n", insn.value.i1);
+                break;
+            case 'm':
+                printf("mem += %d;\n", insn.value.i1);
+                break;
+            case 'z':
+                puts("*mem = 0;");
+                break;
+            case 'C':
+                printf("mem[%d] += %d;\n", insn.value.s2.s0, insn.value.s2.s1);
+                break;
+            case 'M':
+                printf("mem[%d] += *mem * %d;\n", insn.value.s2.s0, insn.value.s2.s1);
+                print_indent(indent);
+                puts("*mem = 0;");
+                break;
+            case 's':
+                printf("{int search = %d;\n", insn.value.i1);
+                print_indent(indent);
+                puts("while (*mem != 0) {");
+                print_indent(indent + 2);
+                puts("mem += search;");
+                print_indent(indent);
+                puts("}}");
+                break;
+            case '\0':
+                puts("return 0;");
+                return;
+            default:
+                fprintf(stderr, "invalid instruction: %c\n", insn.op);
+                exit(1);
+        }
+    }
+}
+void to_c(std::vector<Instruction> &insns) {
+    printf("int main() {\n"
+           "  static int membuf[%d];\n"
+           "  int *mem = membuf;\n", MEMSIZE);
+    print_c(insns, 2);
+    puts("}");
 }
 void execute(std::vector<Instruction> &insns, int membuf[MEMSIZE]) {
     ExeCode exec[insns.size()];
@@ -303,6 +374,8 @@ int main(int argc, char *argv[]) {
             debug(insns, false);
         } else if (strcmp(option, "-debug-verbose") == 0) {
             debug(insns, true);
+        } else if (strcmp(option, "-c") == 0) {
+            to_c(insns);
         }
     }
     return 0;
