@@ -58,11 +58,57 @@ public:
     Instruction& at(const int i) {
         return insns->at(i < 0 ? insns->size() + i : i);
     }
+    int calc_value(Instruction insn) {
+        switch (insn.op) {
+        case CALC:
+            return insn.value.i1;
+        case INC:
+            return 1;
+        case DEC:
+            return -1;
+        default:
+            return 0;
+        }
+    }
+    int move_value(Instruction insn) {
+        switch (insn.op) {
+        case MOVE:
+            return insn.value.i1;
+        case NEXT:
+            return 1;
+        case PREV:
+            return -1;
+        default:
+            return 0;
+        }
+    }
+    void check_calc() {
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        int val1 = calc_value(c1), val2 = calc_value(c2);
+        if (val1 == 0 || val2 == 0)
+            return;
+        pop(2);
+        if (val1 + val2 != 0)
+            push(Instruction(CALC, val1 + val2));
+    }
+    void check_move() {
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        int val1 = move_value(c1), val2 = move_value(c2);
+        if (val1 == 0 || val2 == 0)
+            return;
+        pop(2);
+        if (val1 + val2 != 0)
+            push(Instruction(MOVE, val1 + val2));
+    }
     void check_reset_zero() {
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        if (c1.op != OPEN || c2.op != CALC || c2.value.i1 != -1 || c3.op != CLOSE)
+        if (c1.op != OPEN || c2.op != DEC || c3.op != CLOSE)
             return;
         pop(3);
         push(Instruction(RESET_ZERO));
@@ -71,9 +117,10 @@ public:
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        if (c1.op != MOVE || c2.op != CALC || c3.op != MOVE || (-c1.value.i1 != c3.value.i1))
+        int val1 = move_value(c1), val2 = calc_value(c2), val3 = move_value(c3);
+        if (val1 == 0 || val2 == 0 || val3 == 0 || (-val1 != val3))
             return;
-        short move = c1.value.i1, calc = c2.value.i1;
+        short move = val1, calc = val2;
         pop(3);
         push(Instruction(MOVE_CALC, move, calc));
     }
@@ -81,7 +128,7 @@ public:
         if (insns->size() < 4)
             return;
         Instruction c1 = at(-4), c2 = at(-3), c3 = at(-2), c4 = at(-1);
-        if (c1.op != OPEN || c4.op != CLOSE || c2.op != CALC || c2.value.i1 != -1 || c3.op != MOVE_CALC)
+        if (c1.op != OPEN || c2.op != DEC || c3.op != MOVE_CALC || c4.op != CLOSE)
             return;
         pop(4);
         short move = c3.value.s2.s0;
@@ -92,9 +139,10 @@ public:
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        if (c1.op != OPEN || c2.op != MOVE || c3.op != CLOSE)
+        int val2 = move_value(c2);
+        if (c1.op != OPEN || val2 == 0 || c3.op != CLOSE)
             return;
-        short move = c2.value.i1;
+        short move = val2;
         pop(3);
         push(Instruction(SEARCH_ZERO, move));
     }
@@ -119,11 +167,13 @@ public:
     Compiler(std::vector<Instruction>* insns) :
         insns(insns), calc(0), move(0), optimizer(insns) {
     }
-    void push_calc(int i) {
-        push_stack(CALC, i);
+    void push_calc(Opcode op) {
+        insns->push_back(Instruction(op));
+        optimizer.check_calc();
     }
-    void push_move(int i) {
-        push_stack(MOVE, i);
+    void push_move(Opcode op) {
+        insns->push_back(Instruction(op));
+        optimizer.check_move();
         optimizer.check_move_calc();
     }
     void push_simple(Opcode op) {
@@ -153,16 +203,16 @@ void parse(std::vector<Instruction> &insns, FILE *input) {
     while ((ch=getc(input)) != EOF) {
         switch (ch) {
             case '+':
-                compiler.push_calc(1);
+                compiler.push_calc(INC);
                 break;
             case '-':
-                compiler.push_calc(-1);
+                compiler.push_calc(DEC);
                 break;
             case '>':
-                compiler.push_move(1);
+                compiler.push_move(NEXT);
                 break;
             case '<':
-                compiler.push_move(-1);
+                compiler.push_move(PREV);
                 break;
             case ',':
                 compiler.push_simple(GET);
@@ -185,7 +235,6 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
         Instruction insn = insns[pc];
         const char *name = OPCODE_NAMES[insn.op];
         printf("%s", name);
-//        fputs(name, stdout);
         switch(insn.op) {
             case INC:
             case DEC:
@@ -194,9 +243,9 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case GET:
             case PUT:
             case RESET_ZERO:
-                break;
             case OPEN:
             case CLOSE:
+                break;
             case CALC:
             case MOVE:
             case SEARCH_ZERO:
@@ -221,6 +270,18 @@ void execute(std::vector<Instruction> &insns, int membuf[MEMSIZE]) {
         Instruction insn = insns[pc];
         exec[pc].value = insn.value;
         switch(insn.op) {
+            case INC:
+                exec[pc].addr = &&LABEL_INC;
+                break;
+            case DEC:
+                exec[pc].addr = &&LABEL_DEC;
+                break;
+            case NEXT:
+                exec[pc].addr = &&LABEL_NEXT;
+                break;
+            case PREV:
+                exec[pc].addr = &&LABEL_PREV;
+                break;
             case GET:
                 exec[pc].addr = &&LABEL_GET;
                 break;
@@ -266,6 +327,18 @@ LABEL_START:
     ++pc; \
     goto *pc->addr
 
+    NEXT_LABEL;
+LABEL_INC:
+    ++*mem;
+    NEXT_LABEL;
+LABEL_DEC:
+    --*mem;
+    NEXT_LABEL;
+LABEL_NEXT:
+    ++mem;
+    NEXT_LABEL;
+LABEL_PREV:
+    --mem;
     NEXT_LABEL;
 LABEL_GET:
     *mem = getchar();
