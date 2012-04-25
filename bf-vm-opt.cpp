@@ -9,12 +9,14 @@ enum Opcode {
     INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
     CALC, MOVE, RESET_ZERO,
     MOVE_CALC, MEM_MOVE, SEARCH_ZERO,
+    ZERO_NEXT,
 };
 const char *OPCODE_NAMES[] = {
     "+", "-", ">", "<",
     ",", ".", "[", "]", "",
     "c", "m", "z",
     "C", "M", "s",
+    "N"
 };
 union Value {
     int i1;
@@ -146,6 +148,15 @@ public:
         pop(3);
         push(Instruction(SEARCH_ZERO, move));
     }
+    void check_zero_next() {
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        if (c1.op != RESET_ZERO || c2.op != NEXT)
+            return;
+        pop(2);
+        push(Instruction(ZERO_NEXT));
+    }
 };
 class Compiler {
 private:
@@ -175,6 +186,10 @@ public:
         insns->push_back(Instruction(op));
         optimizer.check_move();
         optimizer.check_move_calc();
+    }
+    void push_next() {
+        push_move(NEXT);
+        optimizer.check_zero_next();
     }
     void push_simple(Opcode op) {
         insns->push_back(Instruction(op));
@@ -209,7 +224,7 @@ void parse(std::vector<Instruction> &insns, FILE *input) {
                 compiler.push_calc(DEC);
                 break;
             case '>':
-                compiler.push_move(NEXT);
+                compiler.push_next();
                 break;
             case '<':
                 compiler.push_move(PREV);
@@ -242,9 +257,10 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case PREV:
             case GET:
             case PUT:
-            case RESET_ZERO:
             case OPEN:
             case CLOSE:
+            case RESET_ZERO:
+            case ZERO_NEXT:
                 break;
             case CALC:
             case MOVE:
@@ -312,6 +328,9 @@ void execute(std::vector<Instruction> &insns, int membuf[MEMSIZE]) {
             case SEARCH_ZERO:
                 exec[pc].addr = &&LABEL_SEARCH_ZERO;
                 break;
+            case ZERO_NEXT:
+                exec[pc].addr = &&LABEL_ZERO_NEXT;
+                break;
             case END:
                 exec[pc].addr = &&LABEL_END;
                 goto LABEL_START;
@@ -375,6 +394,10 @@ LABEL_SEARCH_ZERO:
     while (*mem != 0) {
         mem += search_zero;
     }
+    NEXT_LABEL;
+LABEL_ZERO_NEXT:
+    *mem = 0;
+    ++mem;
     NEXT_LABEL;
 LABEL_END:
     ;
