@@ -3,13 +3,15 @@
 #include <vector>
 #include <stack>
 
+#include <xbyak/xbyak.h>
+
 #define MEMSIZE 30000
+#define CODESIZE 50000
 
 enum Opcode {
     INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
     CALC, MOVE, RESET_ZERO,
     MOVE_CALC, MEM_MOVE, SEARCH_ZERO,
-    ZERO_NEXT,
 };
 const char *OPCODE_NAMES[] = {
     "+", "-", ">", "<",
@@ -38,10 +40,6 @@ public:
         this->value.s2.s1 = s1;
     }
 
-};
-struct ExeCode {
-    void *addr;
-    Value value;
 };
 class Optimizer {
 private:
@@ -148,15 +146,6 @@ public:
         pop(3);
         push(Instruction(SEARCH_ZERO, move));
     }
-    void check_zero_next() {
-        if (insns->size() < 2)
-            return;
-        Instruction c1 = at(-2), c2 = at(-1);
-        if (c1.op != RESET_ZERO || c2.op != NEXT)
-            return;
-        pop(2);
-        push(Instruction(ZERO_NEXT));
-    }
 };
 class Compiler {
 private:
@@ -189,7 +178,6 @@ public:
     }
     void push_next() {
         push_move(NEXT);
-        optimizer.check_zero_next();
     }
     void push_simple(Opcode op) {
         insns->push_back(Instruction(op));
@@ -203,8 +191,8 @@ public:
         int diff = insns->size() - open;
         (*insns)[open].value.i1 = diff;
         insns->push_back(Instruction(CLOSE, diff + 1));
-        optimizer.check_reset_zero();
         pcstack.pop();
+        optimizer.check_reset_zero();
         optimizer.check_mem_move();
         optimizer.check_search_zero();
     }
@@ -224,7 +212,7 @@ void parse(std::vector<Instruction> &insns, FILE *input) {
                 compiler.push_calc(DEC);
                 break;
             case '>':
-                compiler.push_next();
+                compiler.push_move(NEXT);
                 break;
             case '<':
                 compiler.push_move(PREV);
@@ -260,7 +248,6 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case OPEN:
             case CLOSE:
             case RESET_ZERO:
-            case ZERO_NEXT:
                 break;
             case CALC:
             case MOVE:
@@ -280,134 +267,120 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
         }
     }
 }
-void execute(std::vector<Instruction> &insns, int membuf[MEMSIZE]) {
-    ExeCode exec[insns.size()];
+char* toLabel(char ch, int num) {
+    static char labelbuf[BUFSIZ];
+    snprintf(labelbuf, sizeof(labelbuf), "%c%d", ch, num);
+    return labelbuf;
+}
+void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[MEMSIZE]) {
+    gen.push(gen.ebx);
+
+    Xbyak::Reg32 memreg = gen.ebx;
+    Xbyak::Address mem = gen.dword[memreg];
+
+    gen.mov(memreg, (Xbyak::uint32) membuf);
+
+    std::stack<int> labelStack;
+    int labelNum = 0;
+    int beginNum;
+    int searchNum = 0;
     for (size_t pc=0;;++pc) {
         Instruction insn = insns[pc];
-        exec[pc].value = insn.value;
-        switch(insn.op) {
+        switch (insn.op) {
             case INC:
-                exec[pc].addr = &&LABEL_INC;
+                gen.inc(mem);
                 break;
             case DEC:
-                exec[pc].addr = &&LABEL_DEC;
+                gen.dec(mem);
                 break;
             case NEXT:
-                exec[pc].addr = &&LABEL_NEXT;
+                gen.add(memreg, 4);
                 break;
             case PREV:
-                exec[pc].addr = &&LABEL_PREV;
+                gen.add(memreg, -4);
                 break;
             case GET:
-                exec[pc].addr = &&LABEL_GET;
+                gen.call((void*) getchar);
+                gen.mov(mem, gen.eax);
                 break;
             case PUT:
-                exec[pc].addr = &&LABEL_PUT;
+                gen.push(mem);
+                gen.call((void*) putchar);
+                gen.pop(gen.eax);
                 break;
             case OPEN:
-                exec[pc].addr = &&LABEL_OPEN;
+                gen.L(toLabel('L', labelNum));
+                gen.mov(gen.eax, mem);
+                gen.test(gen.eax, gen.eax);
+                gen.jz(toLabel('R', labelNum), Xbyak::CodeGenerator::T_NEAR);
+
+                labelStack.push(labelNum);
+                ++labelNum;
                 break;
             case CLOSE:
-                exec[pc].addr = &&LABEL_CLOSE;
+                beginNum = labelStack.top();
+                labelStack.pop();
+
+                gen.jmp(toLabel('L', beginNum), Xbyak::CodeGenerator::T_NEAR);
+                gen.L(toLabel('R', beginNum));
                 break;
             case CALC:
-                exec[pc].addr = &&LABEL_CALC;
+                gen.add(mem, insn.value.i1);
                 break;
             case MOVE:
-                exec[pc].addr = &&LABEL_MOVE;
+                gen.add(memreg, insn.value.i1 * 4);
                 break;
             case RESET_ZERO:
-                exec[pc].addr = &&LABEL_RESET_ZERO;
+                gen.mov(mem, 0);
                 break;
             case MOVE_CALC:
-                exec[pc].addr = &&LABEL_MOVE_CALC;
+                gen.add(memreg, insn.value.s2.s0 * 4);
+                gen.add(mem, insn.value.s2.s1);
+                gen.add(memreg, -insn.value.s2.s0 * 4);
                 break;
             case MEM_MOVE:
-                exec[pc].addr = &&LABEL_MEM_MOVE;
+                gen.mov(gen.eax, mem);
+                gen.mov(gen.edx, insn.value.s2.s1);
+                gen.mul(gen.edx);
+                gen.add(memreg, insn.value.s2.s0 * 4);
+                gen.add(mem, gen.eax);
+                gen.add(memreg, -insn.value.s2.s0 * 4);
+                gen.mov(mem, 0);
                 break;
             case SEARCH_ZERO:
-                exec[pc].addr = &&LABEL_SEARCH_ZERO;
+                gen.mov(gen.eax, insn.value.i1 * 4);
+                gen.mov(gen.ecx, mem);
+                gen.test(gen.ecx, gen.ecx);
+                gen.jz(toLabel('E', searchNum));
+                gen.L(toLabel('S', searchNum));
+                gen.add(memreg, gen.eax);
+                gen.mov(gen.ecx, mem);
+                gen.test(gen.ecx, gen.ecx);
+                gen.jnz(toLabel('S', searchNum));
+                gen.L(toLabel('E', searchNum));
+                ++searchNum;
                 break;
-            case ZERO_NEXT:
-                exec[pc].addr = &&LABEL_ZERO_NEXT;
-                break;
-            case END:
-                exec[pc].addr = &&LABEL_END;
-                goto LABEL_START;
             default:
+                throw "jit compile error";
+            case END:
+                gen.pop(gen.ebx);
+                gen.ret();
                 return;
         }
     }
-LABEL_START:
-    int *mem = membuf;
-    ExeCode *pc = exec - 1;
-
-#define NEXT_LABEL \
-    ++pc; \
-    goto *pc->addr
-
-    NEXT_LABEL;
-LABEL_INC:
-    ++*mem;
-    NEXT_LABEL;
-LABEL_DEC:
-    --*mem;
-    NEXT_LABEL;
-LABEL_NEXT:
-    ++mem;
-    NEXT_LABEL;
-LABEL_PREV:
-    --mem;
-    NEXT_LABEL;
-LABEL_GET:
-    *mem = getchar();
-    NEXT_LABEL;
-LABEL_PUT:
-    putchar(*mem);
-    NEXT_LABEL;
-LABEL_OPEN:
-    if (*mem == 0) {
-        pc += pc->value.i1;
-    }
-    NEXT_LABEL;
-LABEL_CLOSE:
-    pc -= pc->value.i1;
-    NEXT_LABEL;
-LABEL_CALC:
-    *mem += pc->value.i1;
-    NEXT_LABEL;
-LABEL_MOVE:
-    mem += pc->value.i1;
-    NEXT_LABEL;
-LABEL_RESET_ZERO:
-    *mem = 0;
-    NEXT_LABEL;
-LABEL_MOVE_CALC:
-    mem[pc->value.s2.s0] += pc->value.s2.s1;
-    NEXT_LABEL;
-LABEL_MEM_MOVE:
-    mem[pc->value.s2.s0] += *mem * pc->value.s2.s1;
-    *mem = 0;
-    NEXT_LABEL;
-LABEL_SEARCH_ZERO:
-    int search_zero = pc->value.i1;
-    while (*mem != 0) {
-        mem += search_zero;
-    }
-    NEXT_LABEL;
-LABEL_ZERO_NEXT:
-    *mem = 0;
-    ++mem;
-    NEXT_LABEL;
-LABEL_END:
-    ;
+}
+void execute(Xbyak::CodeGenerator &gen) {
+    void (*codes)() = (void (*)()) gen.getCode();
+    codes();
 }
 int main(int argc, char *argv[]) {
     static int membuf[MEMSIZE];
+    Xbyak::CodeGenerator gen(CODESIZE);
     std::vector<Instruction> insns;
     parse(insns, stdin);
     if (argc == 1) {
-        execute(insns, membuf);
+        jit(gen, insns, membuf);
+        execute(gen);
     } else if (argc == 2) {
         const char *option = argv[1];
         if (strcmp(option, "-debug") == 0) {
