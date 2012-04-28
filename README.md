@@ -1,15 +1,21 @@
 # fast-bf
 
-fast brainf*ck intepreter
+Where is fastest brainf**k intepreter?
 
-## require
+It's fast-bf!
+
+## Isssues
+- Is fast-bf really fastest?
+ - If you find any faster bf interpreter, [please throw New Issue](http://goo.gl/Xpidz)
+
+## Require
 - g++
 - xbyak (used by bf-jit)
 
-## build
+## Build
     $ make
 
-## description
+## Description
 ### bf-vm-opt
 optimized vm implementation
 
@@ -22,6 +28,8 @@ jit compiler (x86) implementation
 - no optimization
 
 
-## sample
+## Sample
 - hello.bf ([http://www.kmonos.net/alang/etc/brainfuck.php](http://www.kmonos.net/alang/etc/brainfuck.php))
-- mandelbrot.b, mandelbrot-huge.b, mandelbrot-titannic.b ([http://esoteric.sange.fi/brainfuck/utils/mandelbrot/](http://esoteric.sange.fi/brainfuck/utils/mandelbrot/))
+- mandelbrot.b, mandelbrot-huge.b, mandelbrot-titannic.b ([http://esoteric.sange.fi/brainfuck/utils/mandelbrot/](http://esoteric.sange.fi/bra
+infuck/utils/mandelbrot/))
+- long.b ([http://mazonka.com/brainf/](http://mazonka.com/brainf/))
