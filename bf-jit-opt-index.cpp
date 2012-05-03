@@ -1,0 +1,393 @@
+#include <cstdio>
+#include <cstring>
+#include <vector>
+#include <stack>
+
+#include <xbyak/xbyak.h>
+
+#define MEMSIZE 30000
+#define CODESIZE 50000
+
+enum Opcode {
+    INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
+    CALC, MOVE, RESET_ZERO,
+    MOVE_CALC, MEM_MOVE, SEARCH_ZERO,
+};
+const char *OPCODE_NAMES[] = {
+    "+", "-", ">", "<",
+    ",", ".", "[", "]", "",
+    "c", "m", "z",
+    "C", "M", "s",
+    "N"
+};
+union Value {
+    int i1;
+    struct {
+        short s0, s1;
+    } s2;
+};
+class Instruction {
+public:
+    Opcode op;
+    Value value;
+    Instruction(Opcode op) : op(op) {
+    }
+    Instruction(Opcode op, int i1) : op(op) {
+        this->value.i1 = i1;
+    }
+    Instruction(Opcode op, short s0, short s1) : op(op) {
+        this->value.s2.s0 = s0;
+        this->value.s2.s1 = s1;
+    }
+
+};
+class Optimizer {
+private:
+    std::vector<Instruction>* const insns;
+public:
+    Optimizer(std::vector<Instruction>* const insns) :
+        insns(insns) {
+    }
+    void push(Instruction insn) {
+        insns->push_back(insn);
+    }
+    void pop(const int count) {
+        for (int i = 0; i < count; ++i)
+            insns->pop_back();
+    }
+    Instruction& at(const int i) {
+        return insns->at(i < 0 ? insns->size() + i : i);
+    }
+    int calc_value(Instruction insn) {
+        switch (insn.op) {
+        case CALC:
+            return insn.value.i1;
+        case INC:
+            return 1;
+        case DEC:
+            return -1;
+        default:
+            return 0;
+        }
+    }
+    int move_value(Instruction insn) {
+        switch (insn.op) {
+        case MOVE:
+            return insn.value.i1;
+        case NEXT:
+            return 1;
+        case PREV:
+            return -1;
+        default:
+            return 0;
+        }
+    }
+    void check_calc() {
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        int val1 = calc_value(c1), val2 = calc_value(c2);
+        if (val1 == 0 || val2 == 0)
+            return;
+        pop(2);
+        if (val1 + val2 != 0)
+            push(Instruction(CALC, val1 + val2));
+    }
+    void check_move() {
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        int val1 = move_value(c1), val2 = move_value(c2);
+        if (val1 == 0 || val2 == 0)
+            return;
+        pop(2);
+        if (val1 + val2 != 0)
+            push(Instruction(MOVE, val1 + val2));
+    }
+    void check_reset_zero() {
+        if (insns->size() < 3)
+            return;
+        Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
+        if (c1.op != OPEN || c2.op != DEC || c3.op != CLOSE)
+            return;
+        pop(3);
+        push(Instruction(RESET_ZERO));
+    }
+    void check_move_calc() {
+        if (insns->size() < 3)
+            return;
+        Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
+        int val1 = move_value(c1), val2 = calc_value(c2), val3 = move_value(c3);
+        if (val1 == 0 || val2 == 0 || val3 == 0 || (-val1 != val3))
+            return;
+        short move = val1, calc = val2;
+        pop(3);
+        push(Instruction(MOVE_CALC, move, calc));
+    }
+    void check_mem_move() {
+        if (insns->size() < 4)
+            return;
+        Instruction c1 = at(-4), c2 = at(-3), c3 = at(-2), c4 = at(-1);
+        if (c1.op != OPEN || c2.op != DEC || c3.op != MOVE_CALC || c4.op != CLOSE)
+            return;
+        pop(4);
+        short move = c3.value.s2.s0;
+        short calc = c3.value.s2.s1;
+        push(Instruction(MEM_MOVE, move, calc));
+    }
+    void check_search_zero() {
+        if (insns->size() < 3)
+            return;
+        Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
+        int val2 = move_value(c2);
+        if (c1.op != OPEN || val2 == 0 || c3.op != CLOSE)
+            return;
+        short move = val2;
+        pop(3);
+        push(Instruction(SEARCH_ZERO, move));
+    }
+};
+class Compiler {
+private:
+    std::vector<Instruction>* const insns;
+    int calc, move;
+    std::stack<int> pcstack;
+    Optimizer optimizer;
+    bool is_current_op(Opcode op) {
+        return insns->size() != 0 && insns->back().op == op;
+    }
+    void push_stack(Opcode op, int i) {
+        if (is_current_op(op)) {
+            insns->back().value.i1 += i;
+        } else {
+            insns->push_back(Instruction(op, i));
+        }
+    }
+public:
+    Compiler(std::vector<Instruction>* insns) :
+        insns(insns), calc(0), move(0), optimizer(insns) {
+    }
+    void push_calc(Opcode op) {
+        insns->push_back(Instruction(op));
+        optimizer.check_calc();
+    }
+    void push_move(Opcode op) {
+        insns->push_back(Instruction(op));
+        optimizer.check_move();
+        optimizer.check_move_calc();
+    }
+    void push_next() {
+        push_move(NEXT);
+    }
+    void push_simple(Opcode op) {
+        insns->push_back(Instruction(op));
+    }
+    void push_open() {
+        pcstack.push(insns->size());
+        insns->push_back(Instruction(OPEN));
+    }
+    void push_close() {
+        int open = pcstack.top();
+        int diff = insns->size() - open;
+        (*insns)[open].value.i1 = diff;
+        insns->push_back(Instruction(CLOSE, diff + 1));
+        pcstack.pop();
+        optimizer.check_reset_zero();
+        optimizer.check_mem_move();
+        optimizer.check_search_zero();
+    }
+    void push_end() {
+        push_simple(END);
+    }
+};
+void parse(std::vector<Instruction> &insns, FILE *input) {
+    Compiler compiler(&insns);
+    int ch = 0;
+    while ((ch=getc(input)) != EOF) {
+        switch (ch) {
+            case '+':
+                compiler.push_calc(INC);
+                break;
+            case '-':
+                compiler.push_calc(DEC);
+                break;
+            case '>':
+                compiler.push_move(NEXT);
+                break;
+            case '<':
+                compiler.push_move(PREV);
+                break;
+            case ',':
+                compiler.push_simple(GET);
+                break;
+            case '.':
+                compiler.push_simple(PUT);
+                break;
+            case '[':
+                compiler.push_open();
+                break;
+            case ']':
+                compiler.push_close();
+                break;
+        }
+    }
+    compiler.push_end();
+}
+void debug(std::vector<Instruction> &insns, bool verbose) {
+    for (size_t pc=0;;++pc) {
+        Instruction insn = insns[pc];
+        const char *name = OPCODE_NAMES[insn.op];
+        printf("%s", name);
+        switch(insn.op) {
+            case INC:
+            case DEC:
+            case NEXT:
+            case PREV:
+            case GET:
+            case PUT:
+            case OPEN:
+            case CLOSE:
+            case RESET_ZERO:
+                break;
+            case CALC:
+            case MOVE:
+            case SEARCH_ZERO:
+                if (verbose) {
+                    printf("(%d)", insn.value.i1);
+                }
+                break;
+            case MOVE_CALC:
+            case MEM_MOVE:
+                if (verbose) {
+                    printf("(%d,%d)", insn.value.s2.s0, insn.value.s2.s1);
+                }
+                break;
+            case END:
+                return;
+        }
+    }
+}
+char* toLabel(char ch, int num) {
+    static char labelbuf[BUFSIZ];
+    snprintf(labelbuf, sizeof(labelbuf), "%c%d", ch, num);
+    return labelbuf;
+}
+void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[MEMSIZE]) {
+    gen.push(gen.ebx);
+
+    Xbyak::Reg32 memreg = gen.ebx;
+    Xbyak::Address mem = gen.dword[memreg];
+
+    gen.mov(memreg, (Xbyak::uint32) membuf);
+
+    std::stack<int> labelStack;
+    int labelNum = 0;
+    int beginNum;
+    int searchNum = 0;
+    for (size_t pc=0;;++pc) {
+        Instruction insn = insns[pc];
+        switch (insn.op) {
+            case INC:
+                gen.inc(mem);
+                break;
+            case DEC:
+                gen.dec(mem);
+                break;
+            case NEXT:
+                gen.add(memreg, 4);
+                break;
+            case PREV:
+                gen.add(memreg, -4);
+                break;
+            case GET:
+                gen.call((void*) getchar);
+                gen.mov(mem, gen.eax);
+                break;
+            case PUT:
+                gen.push(mem);
+                gen.call((void*) putchar);
+                gen.pop(gen.eax);
+                break;
+            case OPEN:
+                gen.L(toLabel('L', labelNum));
+                gen.mov(gen.eax, mem);
+                gen.test(gen.eax, gen.eax);
+                gen.jz(toLabel('R', labelNum), Xbyak::CodeGenerator::T_NEAR);
+
+                labelStack.push(labelNum);
+                ++labelNum;
+                break;
+            case CLOSE:
+                beginNum = labelStack.top();
+                labelStack.pop();
+
+                gen.jmp(toLabel('L', beginNum), Xbyak::CodeGenerator::T_NEAR);
+                gen.L(toLabel('R', beginNum));
+                break;
+            case CALC:
+                gen.add(mem, insn.value.i1);
+                break;
+            case MOVE:
+                gen.add(memreg, insn.value.i1 * 4);
+                break;
+            case RESET_ZERO:
+                gen.mov(mem, 0);
+                break;
+            case MOVE_CALC:
+                gen.add(memreg, insn.value.s2.s0 * 4);
+                gen.add(mem, insn.value.s2.s1);
+                gen.add(memreg, -insn.value.s2.s0 * 4);
+                break;
+            case MEM_MOVE:
+                gen.mov(gen.eax, mem);
+                gen.mov(gen.edx, insn.value.s2.s1);
+                gen.mul(gen.edx);
+                gen.add(memreg, insn.value.s2.s0 * 4);
+                gen.add(mem, gen.eax);
+                gen.add(memreg, -insn.value.s2.s0 * 4);
+                gen.mov(mem, 0);
+                break;
+            case SEARCH_ZERO:
+                gen.mov(gen.eax, insn.value.i1 * 4);
+                gen.mov(gen.ecx, mem);
+                gen.test(gen.ecx, gen.ecx);
+                gen.jz(toLabel('E', searchNum));
+                gen.L(toLabel('S', searchNum));
+                gen.add(memreg, gen.eax);
+                gen.mov(gen.ecx, mem);
+                gen.test(gen.ecx, gen.ecx);
+                gen.jnz(toLabel('S', searchNum));
+                gen.L(toLabel('E', searchNum));
+                ++searchNum;
+                break;
+            default:
+                throw "jit compile error";
+            case END:
+                gen.pop(gen.ebx);
+                gen.ret();
+                return;
+        }
+    }
+}
+void execute(Xbyak::CodeGenerator &gen) {
+    void (*codes)() = (void (*)()) gen.getCode();
+    codes();
+}
+int main(int argc, char *argv[]) {
+    static int membuf[MEMSIZE];
+    Xbyak::CodeGenerator gen(CODESIZE);
+    std::vector<Instruction> insns;
+    parse(insns, stdin);
+    if (argc == 1) {
+        jit(gen, insns, membuf);
+        execute(gen);
+    } else if (argc == 2) {
+        const char *option = argv[1];
+        if (strcmp(option, "-debug") == 0) {
+            debug(insns, false);
+        } else if (strcmp(option, "-debug-verbose") == 0) {
+            debug(insns, true);
+        }
+    }
+    return 0;
+}
