@@ -2,6 +2,7 @@
 #include <cstring>
 #include <vector>
 #include <stack>
+#include <iostream>
 
 #include <xbyak/xbyak.h>
 
@@ -11,13 +12,13 @@
 enum Opcode {
     INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
     CALC, MOVE, RESET_ZERO,
-    MOVE_CALC, MEM_MOVE, SEARCH_ZERO,
+    MOVE_CALC, MEM_MOVE, SEARCH_ZERO, LOAD
 };
 const char *OPCODE_NAMES[] = {
     "+", "-", ">", "<",
     ",", ".", "[", "]", "",
     "c", "m", "z",
-    "C", "M", "s",
+    "C", "M", "s", "l",
     "N"
 };
 union Value {
@@ -105,15 +106,39 @@ public:
             push(Instruction(MOVE, val1 + val2));
     }
     void check_reset_zero() {
+        // [c(-1)] -> l(0)
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        if (c1.op != OPEN || c2.op != DEC || c3.op != CLOSE)
+        int val2 = calc_value(c2);
+        if (c1.op != OPEN || c2.op != CALC || val2 != -1 || c3.op != CLOSE)
             return;
         pop(3);
-        push(Instruction(RESET_ZERO));
+        push(Instruction(LOAD,0));
+    }
+    void check_load() {
+        // l(x)c(y) -> l(x+y)
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        int val2=calc_value(c2);
+        if (c1.op != LOAD || val2 == 0)
+            return;
+        pop(2);
+        push(Instruction(LOAD, c1.value.i1 + val2));
+    }
+    void check_load_dup() {
+        // l(x)l(y) -> l(y)
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        if (c1.op != LOAD || c2.op != LOAD)
+            return;
+        pop(2);
+        push(c2);
     }
     void check_move_calc() {
+        // m(n),c(x),m(-n) -> C(n,x)
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
@@ -125,10 +150,12 @@ public:
         push(Instruction(MOVE_CALC, move, calc));
     }
     void check_mem_move() {
+        // [-C(n,x)] -> M(n,x)
         if (insns->size() < 4)
             return;
         Instruction c1 = at(-4), c2 = at(-3), c3 = at(-2), c4 = at(-1);
-        if (c1.op != OPEN || c2.op != DEC || c3.op != MOVE_CALC || c4.op != CLOSE)
+        int val2 = calc_value(c2);
+        if (c1.op != OPEN || c2.op != CALC || val2 != -1 || c3.op != MOVE_CALC || c4.op != CLOSE)
             return;
         pop(4);
         short move = c3.value.s2.s0;
@@ -168,8 +195,19 @@ public:
         insns(insns), calc(0), move(0), optimizer(insns) {
     }
     void push_calc(Opcode op) {
-        insns->push_back(Instruction(op));
+        switch(op) {
+        case INC:
+            insns->push_back(Instruction(CALC,1));
+            break;
+        case DEC:
+            insns->push_back(Instruction(CALC,-1));
+            break;
+        default:
+            throw "Unsupported";
+        }
         optimizer.check_calc();
+        optimizer.check_load();
+        optimizer.check_load_dup();
     }
     void push_move(Opcode op) {
         insns->push_back(Instruction(op));
@@ -252,6 +290,7 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case CALC:
             case MOVE:
             case SEARCH_ZERO:
+            case LOAD:
                 if (verbose) {
                     printf("(%d)", insn.value.i1);
                 }
@@ -325,7 +364,12 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 gen.L(toLabel('R', beginNum));
                 break;
             case CALC:
-                gen.add(mem, insn.value.i1);
+                if (insn.value.i1 == 1)
+                    gen.inc(mem);
+                else if(insn.value.i1 == -1)
+                    gen.dec(mem);
+                else
+                    gen.add(mem, insn.value.i1);
                 break;
             case MOVE:
                 gen.add(memreg, insn.value.i1 * 4);
@@ -359,6 +403,9 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 gen.jnz(toLabel('S', searchNum));
                 gen.L(toLabel('E', searchNum));
                 ++searchNum;
+                break;
+            case LOAD:
+                gen.mov(mem,insn.value.i1);
                 break;
             default:
                 throw "jit compile error";
