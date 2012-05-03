@@ -150,12 +150,23 @@ public:
         pop(3);
         push(Instruction(MOVE_CALC, move, calc));
     }
-    void check_move_calc_dup() {
+    void check_calc_move_order() {
+        // C(n,x)c(y) -> c(y)C(n,x)
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        if (c1.op != MOVE_CALC || c2.op != CALC)
+            return;
+        pop(2);
+        insns->push_back(c2);
+        insns->push_back(c1);
+    }
+    void check_move_calc_merge() {
         // C(n,x)C(m,y) -> m(n)c(x)m(m-n)c(y)m(-m)
         if (insns->size() < 2)
             return;
         Instruction c1 = at(-2), c2 = at(-1);
-        if (c1.op != CALC || c2.op != CALC)
+        if (c1.op != MOVE_CALC || c2.op != MOVE_CALC)
             return;
         pop(2);
         int n = c1.value.s2.s0, m = c2.value.s2.s0;
@@ -225,12 +236,13 @@ public:
         optimizer.check_calc();
         optimizer.check_load();
         optimizer.check_load_dup();
+        optimizer.check_calc_move_order();
     }
     void push_move(Opcode op) {
         insns->push_back(Instruction(op));
         optimizer.check_move();
         optimizer.check_move_calc();
-        optimizer.check_move_calc_dup();
+        optimizer.check_move_calc_merge();
     }
     void push_next() {
         push_move(NEXT);
