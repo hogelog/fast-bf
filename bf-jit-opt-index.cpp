@@ -84,6 +84,7 @@ public:
         }
     }
     void check_calc() {
+        // c(n)c(m) -> c(n+m)
         if (insns->size() < 2)
             return;
         Instruction c1 = at(-2), c2 = at(-1);
@@ -149,6 +150,22 @@ public:
         pop(3);
         push(Instruction(MOVE_CALC, move, calc));
     }
+    void check_move_calc_dup() {
+        // C(n,x)C(m,y) -> m(n)c(x)m(m-n)c(y)m(-m)
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        if (c1.op != CALC || c2.op != CALC)
+            return;
+        pop(2);
+        int n = c1.value.s2.s0, m = c2.value.s2.s0;
+        int x = c1.value.s2.s1, y = c2.value.s2.s1;
+        insns->push_back(Instruction(MOVE, n));
+        insns->push_back(Instruction(CALC, x));
+        insns->push_back(Instruction(MOVE, m - n));
+        insns->push_back(Instruction(CALC, y));
+        insns->push_back(Instruction(MOVE, -m));
+    }
     void check_mem_move() {
         // [-C(n,x)] -> M(n,x)
         if (insns->size() < 4)
@@ -213,6 +230,7 @@ public:
         insns->push_back(Instruction(op));
         optimizer.check_move();
         optimizer.check_move_calc();
+        optimizer.check_move_calc_dup();
     }
     void push_next() {
         push_move(NEXT);
@@ -364,12 +382,7 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 gen.L(toLabel('R', beginNum));
                 break;
             case CALC:
-                if (insn.value.i1 == 1)
-                    gen.inc(mem);
-                else if(insn.value.i1 == -1)
-                    gen.dec(mem);
-                else
-                    gen.add(mem, insn.value.i1);
+                gen.add(mem, insn.value.i1);
                 break;
             case MOVE:
                 gen.add(memreg, insn.value.i1 * 4);
