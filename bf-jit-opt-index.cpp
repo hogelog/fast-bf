@@ -394,18 +394,26 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 gen.L(toLabel('R', beginNum));
                 break;
             case CALC:
-                gen.add(mem, insn.value.i1);
+                if (insn.value.i1 != 0)
+                    gen.add(mem, insn.value.i1);
                 break;
             case MOVE:
-                gen.add(memreg, insn.value.i1 * 4);
+                if (insn.value.i1 != 0)
+                    gen.add(memreg, insn.value.i1 * 4);
                 break;
             case RESET_ZERO:
                 gen.mov(mem, 0);
                 break;
             case MOVE_CALC:
-                gen.add(memreg, insn.value.s2.s0 * 4);
-                gen.add(mem, insn.value.s2.s1);
-                gen.add(memreg, -insn.value.s2.s0 * 4);
+                if (insn.value.s2.s1 != 0) {
+                    if (insn.value.s2.s0 != 0) {
+                        gen.add(memreg, insn.value.s2.s0 * 4);
+                        gen.add(mem, insn.value.s2.s1);
+                        gen.add(memreg, -insn.value.s2.s0 * 4);
+                    } else {
+                        gen.add(mem, insn.value.s2.s1);
+                    }
+                }
                 break;
             case MEM_MOVE:
                 gen.mov(gen.eax, mem);
