@@ -196,7 +196,8 @@ public:
         int x = c1.value.s2.s1, y = c2.value.s2.s1;
         insns->push_back(Instruction(MOVE, n));
         insns->push_back(Instruction(CALC, x));
-        insns->push_back(Instruction(MOVE, m - n));
+        if (m - n != 0)
+            insns->push_back(Instruction(MOVE, m - n));
         insns->push_back(Instruction(CALC, y));
         insns->push_back(Instruction(MOVE, -m));
     }
@@ -213,7 +214,8 @@ public:
         pop(2);
         insns->push_back(Instruction(MOVE, n));
         insns->push_back(Instruction(CALC, x));
-        insns->push_back(Instruction(MOVE, m-n));
+        if (m - n != 0)
+            insns->push_back(Instruction(MOVE, m-n));
     }
     void check_mem_move() {
         // [-C(n,x)] -> M(n,x)
