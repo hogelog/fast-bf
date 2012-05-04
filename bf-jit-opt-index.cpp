@@ -200,6 +200,21 @@ public:
         insns->push_back(Instruction(CALC, y));
         insns->push_back(Instruction(MOVE, -m));
     }
+    void check_move_calc_move_merge() {
+        // C(n,x)m(m) -> m(n)c(x)m(m-n)
+        if (insns->size() < 2)
+            return;
+        Instruction c1 = at(-2), c2 = at(-1);
+        if (c1.op != MOVE_CALC || c2.op != MOVE)
+            return;
+        int n = c1.value.s2.s0;
+        int x = c1.value.s2.s1;
+        int m = c2.value.i1;
+        pop(2);
+        insns->push_back(Instruction(MOVE, n));
+        insns->push_back(Instruction(CALC, x));
+        insns->push_back(Instruction(MOVE, m-n));
+    }
     void check_mem_move() {
         // [-C(n,x)] -> M(n,x)
         if (insns->size() < 4)
@@ -298,10 +313,20 @@ public:
         optimizer.check_calc_move_order();
     }
     void push_move(Opcode op) {
-        insns->push_back(Instruction(op));
+        switch(op) {
+        case NEXT:
+            insns->push_back(Instruction(MOVE,1));
+            break;
+        case PREV:
+            insns->push_back(Instruction(MOVE,-1));
+            break;
+        default:
+            throw "Unsupported";
+        }
         optimizer.check_move();
         optimizer.check_move_calc();
         optimizer.check_move_calc_merge();
+        optimizer.check_move_calc_move_merge();
     }
     void push_next() {
         push_move(NEXT);
