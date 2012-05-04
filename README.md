@@ -15,6 +15,9 @@ It's fast-bf!
 ## Build
     $ make
 
+## Usage
+    $ ./bf-opt-jit sample/mandelbrot.b
+
 ## Description
 ### bf-vm-opt
 optimized vm implementation
@@ -27,9 +30,20 @@ jit compiler (x86) implementation
 
 - no optimization
 
+### bf-jit-opt
+optimized x86 jit compiler implementation
+
+- fastest BF interpreter
+
 
 ## Sample
 - hello.bf ([http://www.kmonos.net/alang/etc/brainfuck.php](http://www.kmonos.net/alang/etc/brainfuck.php))
 - mandelbrot.b, mandelbrot-huge.b, mandelbrot-titannic.b ([http://esoteric.sange.fi/brainfuck/utils/mandelbrot/](http://esoteric.sange.fi/bra
 infuck/utils/mandelbrot/))
 - long.b ([http://mazonka.com/brainf/](http://mazonka.com/brainf/))
+
+## Authors
+- [hogelog](https://github.com/hogelog)
+- [todesking](https://github.com/todesking)
+ - more optimization
+ - useful commandline arguments

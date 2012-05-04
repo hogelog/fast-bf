@@ -1,4 +1,4 @@
-TARGETS = bf-jit bf-vm-opt bf-jit-opt bf-jit-opt2
+TARGETS = bf-jit bf-vm-opt bf-jit-opt
 
 CXXFLAGS = -m32 -Wall -W -O2 -fno-operator-names
 
