@@ -626,16 +626,26 @@ int main(int argc, char *argv[]) {
     static int membuf[MEMSIZE];
     Xbyak::CodeGenerator gen(CODESIZE);
     std::vector<Instruction> insns;
-    parse(insns, stdin);
-    if (argc == 1) {
-        jit(gen, insns, membuf);
-        execute(gen);
-    } else if (argc == 2) {
-        const char *option = argv[1];
-        if (strcmp(option, "-debug") == 0) {
-            debug(insns, false);
-        } else if (strcmp(option, "-debug-verbose") == 0) {
-            debug(insns, true);
+    if(argc == 1) {
+        printf("usage: $0 <file>(- for stdin) [-debug[-verbose]]\n");
+    } else if(argc >= 2) {
+        if (strcmp(argv[1], "-") == 0) {
+            parse(insns, stdin);
+        } else {
+            FILE* file=fopen(argv[1],"r");
+            parse(insns, file);
+            fclose(file);
+        }
+        if (argc == 2) {
+            jit(gen, insns, membuf);
+            execute(gen);
+        } else if (argc == 3) {
+            const char *option = argv[2];
+            if (strcmp(option, "-debug") == 0) {
+                debug(insns, false);
+            } else if (strcmp(option, "-debug-verbose") == 0) {
+                debug(insns, true);
+            }
         }
     }
     return 0;
