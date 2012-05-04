@@ -86,6 +86,20 @@ public:
             return 0;
         }
     }
+    int move_value_for_index_calculation(Instruction insn) {
+        switch (insn.op) {
+        case MEM_MOVE:
+            return insn.value.s2.s0;
+        case MOVE:
+            return insn.value.i1;
+        case NEXT:
+            return 1;
+        case PREV:
+            return -1;
+        default:
+            return 0;
+        }
+    }
     bool is_undeterminable_move(Instruction insn) {
         switch(insn.op) {
         case SEARCH_ZERO:
@@ -219,7 +233,7 @@ public:
             insns->push_back(Instruction(MOVE, m-n));
     }
     void check_mem_move() {
-        // [-C(n,x)] -> M(n,x)
+        // [-C(n,x)] -> M(n,x)m(-n)
         if (insns->size() < 4)
             return;
         Instruction c1 = at(-4), c2 = at(-3), c3 = at(-2), c4 = at(-1);
@@ -230,8 +244,10 @@ public:
         short move = c3.value.s2.s0;
         short calc = c3.value.s2.s1;
         push(Instruction(MEM_MOVE, move, calc));
+        push(Instruction(MOVE, -move));
     }
     void check_search_zero() {
+        // [m(n)] -> s(n)
         if (insns->size() < 3)
             return;
         Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
@@ -260,13 +276,13 @@ public:
                 return;
             if (is_ecx_used(insn))
                 return;
-            move += move_value(at(i));
+            move += move_value_for_index_calculation(at(i));
         }
         if (move != 0)
             return;
         for (i = -2; at(i).op != OPEN; --i) {
             Instruction insn = at(i);
-            move += move_value(at(i));
+            move += move_value_for_index_calculation(at(i));
             if (move == 0 && insn.op == CALC) {
                 at(i) = Instruction(CALC_FAST,insn.value);
             }
@@ -573,10 +589,9 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 gen.mov(gen.eax, mem);
                 gen.mov(gen.edx, insn.value.s2.s1);
                 gen.mul(gen.edx);
+                gen.mov(mem, 0);
                 gen.add(memreg, insn.value.s2.s0 * 4);
                 gen.add(mem, gen.eax);
-                gen.add(memreg, -insn.value.s2.s0 * 4);
-                gen.mov(mem, 0);
                 break;
             case SEARCH_ZERO:
                 gen.mov(gen.eax, insn.value.i1 * 4);
