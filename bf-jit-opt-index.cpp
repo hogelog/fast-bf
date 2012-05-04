@@ -94,10 +94,11 @@ public:
             return false;
         }
     }
-    bool is_register_eater(Instruction insn) {
+    bool is_ecx_used(Instruction insn) {
         switch (insn.op) {
-            case SEARCH_ZERO:
-            case MEM_MOVE:
+            case OPEN_FAST:
+            case CLOSE_FAST:
+            case CALC_FAST:
             case GET:
             case PUT:
                 return true;
@@ -257,7 +258,7 @@ public:
                 return;
             if (is_undeterminable_move(insn))
                 return;
-            if (is_register_eater(insn))
+            if (is_ecx_used(insn))
                 return;
             move += move_value(at(i));
         }
@@ -528,11 +529,11 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                     gen.add(mem, insn.value.i1);
                 break;
             case OPEN_FAST:
-                gen.mov(gen.edx,memreg);
                 gen.mov(gen.ecx,mem);
                 gen.L(toLabel('L', labelNum));
                 gen.test(gen.ecx, gen.ecx);
                 gen.jz(toLabel('R', labelNum), Xbyak::CodeGenerator::T_NEAR);
+                gen.push(memreg);
 
                 labelStack.push(labelNum);
                 ++labelNum;
@@ -541,7 +542,7 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 beginNum = labelStack.top();
                 labelStack.pop();
 
-                gen.mov(memreg,gen.edx);
+                gen.pop(memreg);
                 gen.jmp(toLabel('L', beginNum), Xbyak::CodeGenerator::T_NEAR);
                 gen.L(toLabel('R', beginNum));
                 gen.mov(mem,gen.ecx);
@@ -579,13 +580,13 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 break;
             case SEARCH_ZERO:
                 gen.mov(gen.eax, insn.value.i1 * 4);
-                gen.mov(gen.ecx, mem);
-                gen.test(gen.ecx, gen.ecx);
+                gen.mov(gen.edx, mem);
+                gen.test(gen.edx, gen.edx);
                 gen.jz(toLabel('E', searchNum));
                 gen.L(toLabel('S', searchNum));
                 gen.add(memreg, gen.eax);
-                gen.mov(gen.ecx, mem);
-                gen.test(gen.ecx, gen.ecx);
+                gen.mov(gen.edx, mem);
+                gen.test(gen.edx, gen.edx);
                 gen.jnz(toLabel('S', searchNum));
                 gen.L(toLabel('E', searchNum));
                 ++searchNum;
