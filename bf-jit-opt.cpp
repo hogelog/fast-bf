@@ -358,43 +358,7 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
     for (size_t pc=0;;++pc) {
         Instruction insn = insns[pc];
         const char *name = OPCODE_NAMES[insn.op];
-        switch(insn.op) {
-        case MOVE:
-            switch(insn.value.i1) {
-            case 1:
-                printf(">");
-                break;
-            case -1:
-                printf("<");
-                break;
-            default:
-                printf("%s", name);
-            }
-            break;
-        case CALC:
-            switch(insn.value.i1) {
-            case 1:
-                printf("+");
-                break;
-            case -1:
-                printf("-");
-                break;
-            default:
-                printf("%s", name);
-            }
-            break;
-        case LOAD:
-            switch(insn.value.i1) {
-            case 0:
-                printf("z");
-                break;
-            default:
-                printf("l");
-            }
-            break;
-        default:
-            printf("%s", name);
-        }
+		printf("%s", name);
         switch(insn.op) {
             case INC:
             case DEC:
@@ -407,13 +371,13 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
                 break;
             case CALC:
             case MOVE:
-                if (verbose && insn.value.i1 != 1 && insn.value.i1 != -1) {
+                if (verbose) {
                     printf("(%d)", insn.value.i1);
                 }
                 break;
             case SEARCH_ZERO:
             case LOAD:
-                if (verbose && insn.value.i1 != 0) {
+                if (verbose) {
                     printf("(%d)", insn.value.i1);
                 }
                 break;
