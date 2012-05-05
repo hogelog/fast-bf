@@ -12,13 +12,13 @@
 enum Opcode {
     INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
     CALC, MOVE,
-    MOVE_CALC, MEM_MOVE, SEARCH_ZERO, LOAD,
+    MEM_MOVE, SEARCH_ZERO, LOAD,
 };
 const char *OPCODE_NAMES[] = {
     "+", "-", ">", "<",
     ",", ".", "[", "]", "",
     "c", "m",
-    "C", "M", "s", "l",
+    "M", "s", "l",
     "N"
 };
 union Value {
@@ -161,74 +161,19 @@ public:
         pop(2);
         push(c2);
     }
-    void check_move_calc() {
-        // m(n),c(x),m(-n) -> C(n,x)
-        if (insns->size() < 3)
-            return;
-        Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        int val1 = move_value(c1), val2 = calc_value(c2), val3 = move_value(c3);
-        if (val1 == 0 || val2 == 0 || val3 == 0 || (-val1 != val3))
-            return;
-        short move = val1, calc = val2;
-        pop(3);
-        push(Instruction(MOVE_CALC, move, calc));
-    }
-    void check_calc_move_order() {
-        // C(n,x)c(y) -> c(y)C(n,x)
-        if (insns->size() < 2)
-            return;
-        Instruction c1 = at(-2), c2 = at(-1);
-        if (c1.op != MOVE_CALC || c2.op != CALC)
-            return;
-        pop(2);
-        insns->push_back(c2);
-        check_calc();
-        insns->push_back(c1);
-    }
-    void check_move_calc_merge() {
-        // C(n,x)C(m,y) -> m(n)c(x)m(m-n)c(y)m(-m)
-        if (insns->size() < 2)
-            return;
-        Instruction c1 = at(-2), c2 = at(-1);
-        if (c1.op != MOVE_CALC || c2.op != MOVE_CALC)
-            return;
-        pop(2);
-        int n = c1.value.s2.s0, m = c2.value.s2.s0;
-        int x = c1.value.s2.s1, y = c2.value.s2.s1;
-        insns->push_back(Instruction(MOVE, n));
-        insns->push_back(Instruction(CALC, x));
-        if (m - n != 0)
-            insns->push_back(Instruction(MOVE, m - n));
-        insns->push_back(Instruction(CALC, y));
-        insns->push_back(Instruction(MOVE, -m));
-    }
-    void check_move_calc_move_merge() {
-        // C(n,x)m(m) -> m(n)c(x)m(m-n)
-        if (insns->size() < 2)
-            return;
-        Instruction c1 = at(-2), c2 = at(-1);
-        if (c1.op != MOVE_CALC || c2.op != MOVE)
-            return;
-        int n = c1.value.s2.s0;
-        int x = c1.value.s2.s1;
-        int m = c2.value.i1;
-        pop(2);
-        insns->push_back(Instruction(MOVE, n));
-        insns->push_back(Instruction(CALC, x));
-        if (m - n != 0)
-            insns->push_back(Instruction(MOVE, m-n));
-    }
     void check_mem_move() {
-        // [-C(n,x)] -> M(n,x)m(-n)
-        if (insns->size() < 4)
+        // [-m(n)c(x)m(-n)] -> M(n,x)m(-n)
+        if (insns->size() < 6)
             return;
-        Instruction c1 = at(-4), c2 = at(-3), c3 = at(-2), c4 = at(-1);
-        int val2 = calc_value(c2);
-        if (c1.op != OPEN || c2.op != CALC || val2 != -1 || c3.op != MOVE_CALC || c4.op != CLOSE)
+        Instruction c1 = at(-6), c2 = at(-5), c3 = at(-4), c4 = at(-3), c5 = at(-2), c6 = at(-1);
+        if (c1.op != OPEN || c2.op != CALC || calc_value(c2) != -1 ||
+                c3.op != MOVE || c4.op != CALC || c5.op != MOVE ||
+                move_value(c3) != -move_value(c5) ||
+                c6.op != CLOSE)
             return;
-        pop(4);
-        short move = c3.value.s2.s0;
-        short calc = c3.value.s2.s1;
+        pop(6);
+        short move = c3.value.i1;
+        short calc = c4.value.i1;
         push(Instruction(MEM_MOVE, move, calc));
         push(Instruction(MOVE, -move));
     }
@@ -279,7 +224,6 @@ public:
         optimizer.check_calc();
         optimizer.check_load();
         optimizer.check_load_dup();
-        optimizer.check_calc_move_order();
     }
     void push_move(Opcode op) {
         switch(op) {
@@ -293,9 +237,6 @@ public:
             throw "Unsupported";
         }
         optimizer.check_move();
-        optimizer.check_move_calc();
-        optimizer.check_move_calc_merge();
-        optimizer.check_move_calc_move_merge();
     }
     void push_next() {
         push_move(NEXT);
@@ -358,7 +299,7 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
     for (size_t pc=0;;++pc) {
         Instruction insn = insns[pc];
         const char *name = OPCODE_NAMES[insn.op];
-		printf("%s", name);
+        printf("%s", name);
         switch(insn.op) {
             case INC:
             case DEC:
@@ -381,7 +322,6 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
                     printf("(%d)", insn.value.i1);
                 }
                 break;
-            case MOVE_CALC:
             case MEM_MOVE:
                 if (verbose) {
                     printf("(%d,%d)", insn.value.s2.s0, insn.value.s2.s1);
@@ -456,17 +396,6 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
             case MOVE:
                 if (insn.value.i1 != 0)
                     gen.add(memreg, insn.value.i1 * 4);
-                break;
-            case MOVE_CALC:
-                if (insn.value.s2.s1 != 0) {
-                    if (insn.value.s2.s0 != 0) {
-                        gen.add(memreg, insn.value.s2.s0 * 4);
-                        gen.add(mem, insn.value.s2.s1);
-                        gen.add(memreg, -insn.value.s2.s0 * 4);
-                    } else {
-                        gen.add(mem, insn.value.s2.s1);
-                    }
-                }
                 break;
             case MEM_MOVE:
                 gen.mov(gen.eax, mem);
