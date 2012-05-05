@@ -11,13 +11,13 @@
 
 enum Opcode {
     INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
-    CALC, MOVE, RESET_ZERO,
+    CALC, MOVE,
     MOVE_CALC, MEM_MOVE, SEARCH_ZERO, LOAD,
 };
 const char *OPCODE_NAMES[] = {
     "+", "-", ">", "<",
     ",", ".", "[", "]", "",
-    "c", "m", "z",
+    "c", "m",
     "C", "M", "s", "l",
     "N"
 };
@@ -404,7 +404,6 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case PUT:
             case OPEN:
             case CLOSE:
-            case RESET_ZERO:
                 break;
             case CALC:
             case MOVE:
@@ -493,9 +492,6 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
             case MOVE:
                 if (insn.value.i1 != 0)
                     gen.add(memreg, insn.value.i1 * 4);
-                break;
-            case RESET_ZERO:
-                gen.mov(mem, 0);
                 break;
             case MOVE_CALC:
                 if (insn.value.s2.s1 != 0) {
