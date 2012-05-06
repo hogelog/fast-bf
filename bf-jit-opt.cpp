@@ -11,16 +11,16 @@
 
 enum Opcode {
     INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
-    CALC, MOVE, RESET_ZERO,
-    MOVE_CALC, MEM_MOVE, SEARCH_ZERO, LOAD,
-    OPEN_FAST, CLOSE_FAST, CALC_FAST
+    CALC, MOVE,
+    SEARCH_ZERO, LOAD,
+    SET_MULTIPLIER, CALC_MULT
 };
 const char *OPCODE_NAMES[] = {
     "+", "-", ">", "<",
     ",", ".", "[", "]", "",
-    "c", "m", "z",
-    "C", "M", "s", "l",
-    "{", "}", "F",
+    "c", "m",
+    "s", "l",
+    "X", "x",
     "N"
 };
 union Value {
@@ -88,8 +88,6 @@ public:
     }
     int move_value_for_index_calculation(Instruction insn) {
         switch (insn.op) {
-        case MEM_MOVE:
-            return insn.value.s2.s0;
         case MOVE:
             return insn.value.i1;
         case NEXT:
@@ -106,18 +104,6 @@ public:
             return true;
         default:
             return false;
-        }
-    }
-    bool is_ecx_used(Instruction insn) {
-        switch (insn.op) {
-            case OPEN_FAST:
-            case CLOSE_FAST:
-            case CALC_FAST:
-            case GET:
-            case PUT:
-                return true;
-            default:
-                return false;
         }
     }
     void check_calc() {
@@ -175,77 +161,6 @@ public:
         pop(2);
         push(c2);
     }
-    void check_move_calc() {
-        // m(n),c(x),m(-n) -> C(n,x)
-        if (insns->size() < 3)
-            return;
-        Instruction c1 = at(-3), c2 = at(-2), c3 = at(-1);
-        int val1 = move_value(c1), val2 = calc_value(c2), val3 = move_value(c3);
-        if (val1 == 0 || val2 == 0 || val3 == 0 || (-val1 != val3))
-            return;
-        short move = val1, calc = val2;
-        pop(3);
-        push(Instruction(MOVE_CALC, move, calc));
-    }
-    void check_calc_move_order() {
-        // C(n,x)c(y) -> c(y)C(n,x)
-        if (insns->size() < 2)
-            return;
-        Instruction c1 = at(-2), c2 = at(-1);
-        if (c1.op != MOVE_CALC || c2.op != CALC)
-            return;
-        pop(2);
-        insns->push_back(c2);
-        check_calc();
-        insns->push_back(c1);
-    }
-    void check_move_calc_merge() {
-        // C(n,x)C(m,y) -> m(n)c(x)m(m-n)c(y)m(-m)
-        if (insns->size() < 2)
-            return;
-        Instruction c1 = at(-2), c2 = at(-1);
-        if (c1.op != MOVE_CALC || c2.op != MOVE_CALC)
-            return;
-        pop(2);
-        int n = c1.value.s2.s0, m = c2.value.s2.s0;
-        int x = c1.value.s2.s1, y = c2.value.s2.s1;
-        insns->push_back(Instruction(MOVE, n));
-        insns->push_back(Instruction(CALC, x));
-        if (m - n != 0)
-            insns->push_back(Instruction(MOVE, m - n));
-        insns->push_back(Instruction(CALC, y));
-        insns->push_back(Instruction(MOVE, -m));
-    }
-    void check_move_calc_move_merge() {
-        // C(n,x)m(m) -> m(n)c(x)m(m-n)
-        if (insns->size() < 2)
-            return;
-        Instruction c1 = at(-2), c2 = at(-1);
-        if (c1.op != MOVE_CALC || c2.op != MOVE)
-            return;
-        int n = c1.value.s2.s0;
-        int x = c1.value.s2.s1;
-        int m = c2.value.i1;
-        pop(2);
-        insns->push_back(Instruction(MOVE, n));
-        insns->push_back(Instruction(CALC, x));
-        if (m - n != 0)
-            insns->push_back(Instruction(MOVE, m-n));
-    }
-    void check_mem_move() {
-        // [-C(n,x)] -> M(n,x)m(-n)
-        if (insns->size() < 4)
-            return;
-        Instruction c1 = at(-4), c2 = at(-3), c3 = at(-2), c4 = at(-1);
-        int val2 = calc_value(c2);
-        if (c1.op != OPEN || c2.op != CALC || val2 != -1 || c3.op != MOVE_CALC || c4.op != CLOSE)
-            return;
-        pop(4);
-        short move = c3.value.s2.s0;
-        short calc = c3.value.s2.s1;
-        push(Instruction(MEM_MOVE, move, calc));
-        push(Instruction(MOVE, -move));
-    }
     void check_search_zero() {
         // [m(n)] -> s(n)
         if (insns->size() < 3)
@@ -258,41 +173,49 @@ public:
         pop(3);
         push(Instruction(SEARCH_ZERO, move));
     }
-    void check_fast_loop() {
-        // [ ... ] -> { ... }
-        //   if loop is innermost and has single loop counter and simple instruction only
-        if (insns->size() < 2)
+    void check_multiplier_loop() {
+        // [A] -> Xl(0)A'
+        //   when A contains ><+- only, and >< is balanced, and p[0] decreased by 1
+        //   where A' = replace c(n) to x(n), and remove p[0]-- from A.
+        if (insns->size() < 4)
             return;
         if (at(-1).op != CLOSE)
             return;
+        int loop_start=-2;
+        for (; at(loop_start).op != OPEN; --loop_start)
+            ;
         int move = 0;
-        int i;
-        for (i = -2; at(i).op != OPEN; --i) {
-            Instruction insn = at(i);
-            // has inner loop
-            if (insn.op == CLOSE || insn.op == CLOSE_FAST)
+        int counter_delta = 0;
+        for (int i = loop_start + 1; i < -1; ++i) {
+            if (at(i).op != MOVE && at(i).op != CALC)
                 return;
-            if (is_undeterminable_move(insn))
-                return;
-            if (is_ecx_used(insn))
-                return;
-            move += move_value_for_index_calculation(at(i));
+            move += move_value(at(i));
+            if (move == 0)
+                counter_delta += calc_value(at(i));
         }
         if (move != 0)
             return;
-        for (i = -2; at(i).op != OPEN; --i) {
-            Instruction insn = at(i);
-            move += move_value_for_index_calculation(at(i));
-            if (move == 0 && insn.op == CALC) {
-                at(i) = Instruction(CALC_FAST, insn.value);
+        if (counter_delta != -1)
+            return;
+
+        std::vector<Instruction> new_ops;
+        new_ops.push_back(Instruction(SET_MULTIPLIER));
+        new_ops.push_back(Instruction(LOAD,0));
+        move = 0;
+        for (int i = loop_start + 1; i < -1; ++i) {
+            move += move_value(at(i));
+            if (at(i).op == CALC) {
+                if (move != 0)
+                    new_ops.push_back(Instruction(CALC_MULT,at(i).value.i1));
+            } else {
+                new_ops.push_back(at(i));
             }
         }
-        at(i) = Instruction(OPEN_FAST);
-        if (at(-2).op == MOVE)
-            pop(2);
-        else
-            pop(1);
-        insns->push_back(Instruction(CLOSE_FAST));
+
+        pop(-loop_start);
+        for (std::vector<Instruction>::iterator it = new_ops.begin(); it != new_ops.end(); ++it) {
+            push(*it);
+        }
     }
 };
 class Compiler {
@@ -329,7 +252,6 @@ public:
         optimizer.check_calc();
         optimizer.check_load();
         optimizer.check_load_dup();
-        optimizer.check_calc_move_order();
     }
     void push_move(Opcode op) {
         switch(op) {
@@ -343,9 +265,6 @@ public:
             throw "Unsupported";
         }
         optimizer.check_move();
-        optimizer.check_move_calc();
-        optimizer.check_move_calc_merge();
-        optimizer.check_move_calc_move_merge();
     }
     void push_next() {
         push_move(NEXT);
@@ -364,9 +283,8 @@ public:
         insns->push_back(Instruction(CLOSE, diff + 1));
         pcstack.pop();
         optimizer.check_reset_zero();
-        optimizer.check_mem_move();
         optimizer.check_search_zero();
-        optimizer.check_fast_loop();
+        optimizer.check_multiplier_loop();
     }
     void push_end() {
         push_simple(END);
@@ -409,43 +327,7 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
     for (size_t pc=0;;++pc) {
         Instruction insn = insns[pc];
         const char *name = OPCODE_NAMES[insn.op];
-        switch(insn.op) {
-        case MOVE:
-            switch(insn.value.i1) {
-            case 1:
-                printf(">");
-                break;
-            case -1:
-                printf("<");
-                break;
-            default:
-                printf("%s", name);
-            }
-            break;
-        case CALC:
-            switch(insn.value.i1) {
-            case 1:
-                printf("+");
-                break;
-            case -1:
-                printf("-");
-                break;
-            default:
-                printf("%s", name);
-            }
-            break;
-        case LOAD:
-            switch(insn.value.i1) {
-            case 0:
-                printf("z");
-                break;
-            default:
-                printf("l");
-            }
-            break;
-        default:
-            printf("%s", name);
-        }
+        printf("%s", name);
         switch(insn.op) {
             case INC:
             case DEC:
@@ -454,28 +336,20 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case GET:
             case PUT:
             case OPEN:
-            case OPEN_FAST:
             case CLOSE:
-            case CLOSE_FAST:
-            case RESET_ZERO:
+            case SET_MULTIPLIER:
                 break;
             case CALC:
+            case CALC_MULT:
             case MOVE:
-                if (verbose && insn.value.i1 != 1 && insn.value.i1 != -1) {
+                if (verbose) {
                     printf("(%d)", insn.value.i1);
                 }
                 break;
-            case CALC_FAST:
             case SEARCH_ZERO:
             case LOAD:
-                if (verbose && insn.value.i1 != 0) {
-                    printf("(%d)", insn.value.i1);
-                }
-                break;
-            case MOVE_CALC:
-            case MEM_MOVE:
                 if (verbose) {
-                    printf("(%d,%d)", insn.value.s2.s0, insn.value.s2.s1);
+                    printf("(%d)", insn.value.i1);
                 }
                 break;
             case END:
@@ -544,53 +418,16 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 if (insn.value.i1 != 0)
                     gen.add(mem, insn.value.i1);
                 break;
-            case OPEN_FAST:
-                gen.mov(gen.ecx,mem);
-                gen.L(toLabel('L', labelNum));
-                gen.test(gen.ecx, gen.ecx);
-                gen.jz(toLabel('R', labelNum), Xbyak::CodeGenerator::T_NEAR);
-                gen.push(memreg);
-
-                labelStack.push(labelNum);
-                ++labelNum;
-                break;
-            case CLOSE_FAST:
-                beginNum = labelStack.top();
-                labelStack.pop();
-
-                gen.pop(memreg);
-                gen.jmp(toLabel('L', beginNum), Xbyak::CodeGenerator::T_NEAR);
-                gen.L(toLabel('R', beginNum));
-                gen.mov(mem,gen.ecx);
-                break;
-            case CALC_FAST:
-                if (insn.value.i1 != 0)
-                    gen.add(gen.ecx, insn.value.i1);
-                break;
             case MOVE:
                 if (insn.value.i1 != 0)
                     gen.add(memreg, insn.value.i1 * 4);
                 break;
-            case RESET_ZERO:
-                gen.mov(mem, 0);
+            case SET_MULTIPLIER:
+                gen.mov(gen.edx, mem);
                 break;
-            case MOVE_CALC:
-                if (insn.value.s2.s1 != 0) {
-                    if (insn.value.s2.s0 != 0) {
-                        gen.add(memreg, insn.value.s2.s0 * 4);
-                        gen.add(mem, insn.value.s2.s1);
-                        gen.add(memreg, -insn.value.s2.s0 * 4);
-                    } else {
-                        gen.add(mem, insn.value.s2.s1);
-                    }
-                }
-                break;
-            case MEM_MOVE:
-                gen.mov(gen.eax, mem);
-                gen.mov(gen.edx, insn.value.s2.s1);
-                gen.mul(gen.edx);
-                gen.mov(mem, 0);
-                gen.add(memreg, insn.value.s2.s0 * 4);
+            case CALC_MULT:
+                gen.mov(gen.eax, insn.value.i1);
+                gen.imul(gen.eax,gen.edx);
                 gen.add(mem, gen.eax);
                 break;
             case SEARCH_ZERO:
@@ -609,12 +446,12 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
             case LOAD:
                 gen.mov(mem, insn.value.i1);
                 break;
-            default:
-                throw "jit compile error";
             case END:
                 gen.pop(gen.ebx);
                 gen.ret();
                 return;
+            default:
+                throw "jit compile error";
         }
     }
 }
