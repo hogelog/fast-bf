@@ -13,12 +13,14 @@ enum Opcode {
     INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
     CALC, MOVE,
     MEM_MOVE, SEARCH_ZERO, LOAD,
+    SET_MULTIPLIER, CALC_MULT
 };
 const char *OPCODE_NAMES[] = {
     "+", "-", ">", "<",
     ",", ".", "[", "]", "",
     "c", "m",
     "M", "s", "l",
+    "X", "x",
     "N"
 };
 union Value {
@@ -189,6 +191,50 @@ public:
         pop(3);
         push(Instruction(SEARCH_ZERO, move));
     }
+    void check_multiplier_loop() {
+        // [A] -> Xl(0)A'
+        //   when A contains ><+- only, and >< is balanced, and p[0] decreased by 1
+        //   where A' = replace c(n) to x(n), and remove p[0]-- from A.
+        if (insns->size() < 4)
+            return;
+        if (at(-1).op != CLOSE)
+            return;
+        int loop_start=-2;
+        for (; at(loop_start).op != OPEN; --loop_start)
+            ;
+        int move = 0;
+        int counter_delta = 0;
+        for (int i = loop_start + 1; i < -1; ++i) {
+            if (at(i).op != MOVE && at(i).op != CALC)
+                return;
+            move += move_value(at(i));
+            if (move == 0)
+                counter_delta += calc_value(at(i));
+        }
+        if (move != 0)
+            return;
+        if (counter_delta != -1)
+            return;
+
+        std::vector<Instruction> new_ops;
+        new_ops.push_back(Instruction(SET_MULTIPLIER));
+        new_ops.push_back(Instruction(LOAD,0));
+        move = 0;
+        for (int i = loop_start + 1; i < -1; ++i) {
+            move += move_value(at(i));
+            if (at(i).op == CALC) {
+                if (move != 0)
+                    new_ops.push_back(Instruction(CALC_MULT,at(i).value.i1));
+            } else {
+                new_ops.push_back(at(i));
+            }
+        }
+
+        pop(-loop_start);
+        for (std::vector<Instruction>::iterator it = new_ops.begin(); it != new_ops.end(); ++it) {
+            push(*it);
+        }
+    }
 };
 class Compiler {
 private:
@@ -257,6 +303,7 @@ public:
         optimizer.check_reset_zero();
         optimizer.check_mem_move();
         optimizer.check_search_zero();
+        optimizer.check_multiplier_loop();
     }
     void push_end() {
         push_simple(END);
@@ -309,8 +356,10 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case PUT:
             case OPEN:
             case CLOSE:
+            case SET_MULTIPLIER:
                 break;
             case CALC:
+            case CALC_MULT:
             case MOVE:
                 if (verbose) {
                     printf("(%d)", insn.value.i1);
@@ -397,6 +446,14 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
                 if (insn.value.i1 != 0)
                     gen.add(memreg, insn.value.i1 * 4);
                 break;
+            case SET_MULTIPLIER:
+                gen.mov(gen.edx, mem);
+                break;
+            case CALC_MULT:
+                gen.mov(gen.eax, insn.value.i1);
+                gen.imul(gen.eax,gen.edx);
+                gen.add(mem, gen.eax);
+                break;
             case MEM_MOVE:
                 gen.mov(gen.eax, mem);
                 gen.mov(gen.edx, insn.value.s2.s1);
@@ -421,12 +478,12 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
             case LOAD:
                 gen.mov(mem, insn.value.i1);
                 break;
-            default:
-                throw "jit compile error";
             case END:
                 gen.pop(gen.ebx);
                 gen.ret();
                 return;
+            default:
+                throw "jit compile error";
         }
     }
 }
