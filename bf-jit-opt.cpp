@@ -12,14 +12,14 @@
 enum Opcode {
     INC = 0, DEC, NEXT, PREV, GET, PUT, OPEN, CLOSE, END,
     CALC, MOVE,
-    MEM_MOVE, SEARCH_ZERO, LOAD,
+    SEARCH_ZERO, LOAD,
     SET_MULTIPLIER, CALC_MULT
 };
 const char *OPCODE_NAMES[] = {
     "+", "-", ">", "<",
     ",", ".", "[", "]", "",
     "c", "m",
-    "M", "s", "l",
+    "s", "l",
     "X", "x",
     "N"
 };
@@ -88,8 +88,6 @@ public:
     }
     int move_value_for_index_calculation(Instruction insn) {
         switch (insn.op) {
-        case MEM_MOVE:
-            return insn.value.s2.s0;
         case MOVE:
             return insn.value.i1;
         case NEXT:
@@ -162,22 +160,6 @@ public:
             return;
         pop(2);
         push(c2);
-    }
-    void check_mem_move() {
-        // [-m(n)c(x)m(-n)] -> M(n,x)m(-n)
-        if (insns->size() < 6)
-            return;
-        Instruction c1 = at(-6), c2 = at(-5), c3 = at(-4), c4 = at(-3), c5 = at(-2), c6 = at(-1);
-        if (c1.op != OPEN || c2.op != CALC || calc_value(c2) != -1 ||
-                c3.op != MOVE || c4.op != CALC || c5.op != MOVE ||
-                move_value(c3) != -move_value(c5) ||
-                c6.op != CLOSE)
-            return;
-        pop(6);
-        short move = c3.value.i1;
-        short calc = c4.value.i1;
-        push(Instruction(MEM_MOVE, move, calc));
-        push(Instruction(MOVE, -move));
     }
     void check_search_zero() {
         // [m(n)] -> s(n)
@@ -301,7 +283,6 @@ public:
         insns->push_back(Instruction(CLOSE, diff + 1));
         pcstack.pop();
         optimizer.check_reset_zero();
-        optimizer.check_mem_move();
         optimizer.check_search_zero();
         optimizer.check_multiplier_loop();
     }
@@ -369,11 +350,6 @@ void debug(std::vector<Instruction> &insns, bool verbose) {
             case LOAD:
                 if (verbose) {
                     printf("(%d)", insn.value.i1);
-                }
-                break;
-            case MEM_MOVE:
-                if (verbose) {
-                    printf("(%d,%d)", insn.value.s2.s0, insn.value.s2.s1);
                 }
                 break;
             case END:
@@ -452,14 +428,6 @@ void jit(Xbyak::CodeGenerator &gen, std::vector<Instruction> &insns, int membuf[
             case CALC_MULT:
                 gen.mov(gen.eax, insn.value.i1);
                 gen.imul(gen.eax,gen.edx);
-                gen.add(mem, gen.eax);
-                break;
-            case MEM_MOVE:
-                gen.mov(gen.eax, mem);
-                gen.mov(gen.edx, insn.value.s2.s1);
-                gen.mul(gen.edx);
-                gen.mov(mem, 0);
-                gen.add(memreg, insn.value.s2.s0 * 4);
                 gen.add(mem, gen.eax);
                 break;
             case SEARCH_ZERO:
