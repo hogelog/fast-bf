@@ -47,3 +47,6 @@ infuck/utils/mandelbrot/))
 - [todesking](https://github.com/todesking)
  - more optimization
  - useful commandline arguments
+
+## See Also
+- [fastest-bf-interpreter@slideshare](http://www.slideshare.net/hogelog/fastest-bf-interpreter)
