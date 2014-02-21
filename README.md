@@ -4,9 +4,9 @@ Where is fastest brainf**k intepreter?
 
 It's fast-bf!
 
+But [rdebath/Brainfuck](https://github.com/rdebath/Brainfuck) is more faster!
+
 ## Isssues
-- Is fast-bf really fastest?
- - If you find any faster bf interpreter, [please throw New Issue](http://goo.gl/Xpidz)
 
 ## Require
 - g++
@@ -33,7 +33,7 @@ jit compiler (x86) implementation
 ### bf-jit-opt
 optimized x86 jit compiler implementation
 
-- fastest BF interpreter
+- fastest in these interpreters
 
 
 ## Sample
